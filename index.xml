@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+      <title>vheissu on vheissu </title>
+      <generator uri="https://gohugo.io">Hugo</generator>
+    <link>http://vheis.su/index.xml</link>
+    
+    
+    <copyright>&amp;nbsp</copyright>
+    <updated>Sat, 25 Mar 2017 21:02:10 CET</updated>
+    
+    <item>
+      <title>The Promised Land</title>
+      <link>http://vheis.su/post/test/</link>
+      <pubDate>Sat, 25 Mar 2017 21:02:10 CET</pubDate>
+      
+      <guid>http://vheis.su/post/test/</guid>
+      <description>&lt;p&gt;This is a void.&lt;/p&gt;
+</description>
+    </item>
+    
+  </channel>
+</rss>
