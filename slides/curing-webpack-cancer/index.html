@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Curing Webpack Cancer</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+    <style type="text/css">
+      @font-face{
+        font-family: 'Droid Serif';
+        src: url('DroidSerif.ttf');
+      }
+      @font-face{
+        font-family: 'Yanone Kaffeesatz';
+        src: url('YanoneKaffeesatz-Regular.ttf');
+      }
+      @font-face{
+        font-family: 'Ubuntu Mono';
+        src: url('UbuntuMono-Regular.ttf');
+      }
+
+      body { font-family: 'Droid Serif'; }
+      h1, h2, h3 {
+        font-family: 'Yanone Kaffeesatz';
+        font-weight: normal;
+      }
+      .remark-code, .remark-inline-code { font-family: 'Ubuntu Mono'; }
+      .remark-inline-code {
+        color: #ab3520;
+      }
+
+      li {
+        margin: 10px 0;
+
+      }
+
+      li li {
+        font-size: 16px;
+      }
+
+      h3 {
+        font-size: 25px !important;
+      }
+
+      .chunks img {
+        height: 500px;
+      }
+
+      .lodash img {
+        width: 700px;
+      }
+
+    </style>
+  </head>
+  <body>
+    <textarea id="source">
+
+class: center, middle
+
+# Curing Webpack Cancer
+### Neel Shah
+### Backend @ Meister
+
+---
+# define cancer
+
+
+* broken deploys
+* works on my machine :shrug:
+* 50 million plugin library of babel
+    * Borges would be proud
+* non-determinism in a build tool
+* terrible documentation
+* breaking changes every year
+
+---
+# what we wanted to do
+
+* upgrade to rails 5.2 and then 6 (currently on 5.0.7.2)
+* move from `webpack-rails` (non-standard gem)
+* to `webpacker` (standard gem and optional rails dependency)
+
+---
+# what we had in ruby
+
+
+* `webpack-rails` gem
+* `webpack_asset_paths` helper for use in views
+    * using the webpack manifest
+* custom rake task `client:compile` to build the bundles
+
+```ruby
+namespace :client do
+  desc 'Compile webpack bundles'
+  task compile: :environment do
+    # blabla
+
+    webpack_bin = ::Rails.root.join(::Rails.configuration.webpack.binary)
+    config_file = ::Rails.root.join(::Rails.configuration.webpack.config_file)
+
+    sh "RAILS_ENV=\"#{environment}\" #{webpack_bin} " +
+      "--config #{config_file} --bail --env.app-version=\"#{commit_hash}\""
+  end
+end
+```
+
+---
+# what we had in js
+
+* `webpack` 3.8.1
+* a moderately complicated `webpack.config.js` file
+* a few loaders
+    * `/(babel|style|css|postcss|sass|url)-loader/`
+* a few plugins
+    * `StatsPlugin`
+    * `LodashModuleReplacementPlugin`
+    * `CommonsChunkPlugin`
+
+---
+
+# what we had in js
+
+and all this source
+
+```bash
+neel@vheissu:~/meisterlabs/mindmeister/webpack$ cloc .
+     349 text files.
+     349 unique files.
+Complex regular subexpression recursion limit (32766)
+exceeded at /usr/bin/cloc line 7327.
+       1 file ignored.
+
+github.com/AlDanial/cloc v 1.70  T=0.76 s (458.9 files/s, 94657.1 lines/s)
+-------------------------------------------------------------------------------
+Language                     files          blank        comment           code
+-------------------------------------------------------------------------------
+JavaScript                     331           9849           7890          52956
+SASS                            18            153              1           1132
+-------------------------------------------------------------------------------
+SUM:                           349          10002           7891          54088
+-------------------------------------------------------------------------------
+```
+---
+# migrating to webpacker
+
+* add the gem
+* run `webpacker:install`
+* move from `npm` to `yarn`
+* webpacker gives `rake webpack:compile`
+    * no more custom `rake client:compile`
+    * automatically hooks into `rake assets:precompile`
+* dev server built in - `./bin/webpack-dev-server`
+    * automatically compiles assets if no dev server running
+* move all entry files to `packs/` subdirectory
+
+---
+# migrating views
+
+instead of `webpack_asset_paths`, webpacker gives us
+
+```ruby
+<%= javascript_pack_tag 'application' %>
+<%= stylesheet_pack_tag 'application' %>
+<img src="<%= asset_pack_path 'images/logo.svg' %>" />
+
+<%= javascript_packs_with_chunks_tag 'calendar', 'map' %>
+```
+
+and the diffs look like
+```diff
+diff --git a/app/views/developers/embed.html.erb b/app/views/developers/embed.html.erb
+index cd046d31cc..fee56083eb 100755
+--- a/app/views/developers/embed.html.erb
++++ b/app/views/developers/embed.html.erb
+@@ -1,7 +1,7 @@
+ <% content_for :page_includes do %>
+-  <%= javascript_include_tag *webpack_runtime_vendor, crossorigin: 'anonymous' %>
+-  <%= javascript_include_tag *webpack_asset_paths('embed'), crossorigin: 'anonymous' %>
++  <%= javascript_packs_with_chunks_tag 'embed', crossorigin: 'anonymous' %>
+ <% end %>
++
+```
+
+---
+# migrating configs
+
+* slightly more spaghetti compared to single `webpack.config.js`
+* mixture of `config/webpacker.yml`
+    * paths, file extensions, dev server
+* and `config/webpack/environment.js` files
+    * each environment can override/extend the base config
+    * loaders and plugins
+* bump to webpack 4
+* `UglifyJsPlugin` -> `TerserPlugin`
+* `CommonsChunkPlugin` -> `optimization.splitChunks`
+
+---
+class: chunks
+# chunks
+.center[![peanutbutter](peanutbutter.jpg)]
+
+---
+# chunks
+
+
+* before - single commons, vendor, runtime
+* after -  multiple commons/vendor
+* decided automagically by webpack
+* based on the module/chunk dependency graph
+
+
+```javascript
+environment.config.set('optimization', {
+    splitChunks: {
+        chunks: 'all',
+        name: true
+    },
+    runtimeChunk: 'single'
+});
+```
+
+---
+# russian roulette deploys
+
+* randomly failing deploys
+* different manifests
+* different md5sums
+* 2/11 servers output different bundles
+
+<table><tr>
+<td><pre><code class="remark-code">
+"core": {
+  "js": [
+    "/assets/packs/js/runtime-hash.js",
+    "/assets/packs/js/12-hash.chunk.js",
+    "/assets/packs/js/13-hash.chunk.js",
+    "/assets/packs/js/core-hash.chunk.js"
+  ],
+</code></pre></td>
+<td><pre><code class="remark-code">
+"core": {
+  "js": [
+    "/assets/packs/js/runtime-hash.js",
+    !!! - MISSING - !!!
+    "/assets/packs/js/13-hash.chunk.js",
+    "/assets/packs/js/core-hash.chunk.js"
+  ],
+</code></pre></td>
+</tr></table>
+
+---
+# did you refresh?
+
+* runtime in browser asks cdn for chunk
+* cdn populates from any of the servers - more non-determinism
+* cdn doesn't know that chunk - :poop:
+* cdn sends the chunk but has wrong content - :poop:
+* user sees blank pages ~30% of the time
+* also some geographical effects based on cdn
+
+.center[![bugnsag](bugsnag.png)]
+
+---
+class: lodash
+# the culprit
+
+.center[https://github.com/lodash/lodash-webpack-plugin/issues/162]
+
+
+.center[![bugsnag_lodash](bugsnag_lodash.png)]
+
+---
+# read the source, luke
+
+* webpack plugins use [`webpack/tapable`](https://github.com/webpack/tapable)
+* each plugin _hooks_ into some part of the build process
+* two plugins can asynchronously process the module/chunk graph
+* take two arbitrary plugins written by different authors
+* what guarantees they commute?
+    * in -> A -> B -> out1
+    * in -> B -> A -> out2
+
+```javascript
+const {
+	SyncHook,
+	SyncBailHook,
+	SyncWaterfallHook,
+	SyncLoopHook,
+	AsyncParallelHook,
+	AsyncParallelBailHook,
+	AsyncSeriesHook,
+	AsyncSeriesBailHook,
+	AsyncSeriesWaterfallHook
+ } = require("tapable");
+```
+
+---
+# diving into the chunk graph
+
+* `debugger;` inside webpack source and `chrome://inspect`
+    * node equivalent of `binding.pry`
+* hundreds of chunks with no metadata
+    * metadata = modules depending on chunk, chunk reason
+* coming from dynamic imports - `import()`
+
+```javascript
+/**
+ * lib/optimize/SplitChunksPlugin.js
+ * @param {Compiler} compiler webpack compiler
+ * @returns {void}
+ */
+apply(compiler) {
+    compiler.hooks.thisCompilation.tap("SplitChunksPlugin", compilation => {
+        debugger;
+
+        //blabla
+
+        GraphHelpers.connectChunkAndModule(newChunk, module);
+    }
+}
+```
+
+---
+# dynamic imports
+
+* dynamic imports with dynamic expressions
+* created a chunk for every single file within `app/`
+* blew up the chunk graph
+* bigger / denser graph = confused `SplitChunksPlugin`
+
+```javascript
+ loadModule: function(asset, callback) {
+    import(`app/${asset}`)
+        .then(module => {
+            if (callback) {
+                callback(module)
+            }
+        });
+    }
+```
+
+---
+# magic comments
+
+* isolate all dynamic chunks to top level `lazy/` folder
+* use `webpackChunkName` magic comment to name dynamic chunks
+* total emitted js bundles from 225 -> 75
+
+```diff
+     loadModule: function(asset, callback) {
+-        import(`app/${asset}`)
+-            .then(module => {
+-                if (callback) {
+-                    callback(module)
+-                }
+-            });
++        import(
++            /* webpackChunkName: [request]" */
++            `lazy/${asset}`
++        ).then(module => {
++            if (callback) {
++                callback(module)
++            }
++        });
+     },
+```
+
+---
+# cancer has no cure (yet)
+
+* forever fighting our tools
+* claims to 'just work'
+* took more than a week of diving deep into webpack internals
+* will probably have to do this all over again for the next upgrade
+
+.center[![quote](quote.png)]
+
+
+---
+# links and references
+
+* https://webpack.js.org/plugins/split-chunks-plugin/
+* https://github.com/lodash/lodash-webpack-plugin/issues/162
+* https://github.com/rails/webpacker/blob/master/docs/troubleshooting.md#debugging-your-webpack-config
+* https://webpack.js.org/contribute/debugging/#devtools
+* https://medium.com/webpack/the-chunk-graph-algorithm-week-26-29-7c88aa5e4b4e
+
+.bottom[Slides made with https://github.com/gnab/remark]
+    </textarea>
+    <script src="remark.js" type="text/javascript">
+    </script>
+    <script type="text/javascript">
+      var slideshow = remark.create();
+    </script>
+  </body>
+</html>
