@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Polyglot Library Development</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+    <style type="text/css">
+      @font-face{
+        font-family: 'Droid Serif';
+        src: url('DroidSerif.ttf');
+      }
+      @font-face{
+        font-family: 'Yanone Kaffeesatz';
+        src: url('YanoneKaffeesatz-Regular.ttf');
+      }
+      @font-face{
+        font-family: 'Ubuntu Mono';
+        src: url('UbuntuMono-Regular.ttf');
+      }
+
+      body { font-family: 'Droid Serif'; }
+      h1, h2, h3 {
+        font-family: 'Yanone Kaffeesatz';
+        font-weight: normal;
+      }
+      .remark-code, .remark-inline-code { font-family: 'Ubuntu Mono'; }
+      .remark-inline-code {
+        color: #ab3520;
+      }
+
+      li {
+        margin: 10px 0;
+      }
+
+      li li {
+        font-size: 16px;
+      }
+
+      h3 {
+        font-size: 25px !important;
+      }
+
+      .full img {
+          height: 400px;
+      }
+
+      .polyglot img {
+          height: 400px;
+      }
+
+      .monke img {
+          height: 400px;
+      }
+
+      .jedi img {
+          height: 300px;
+      }
+
+      table {
+          border-collapse: collapse;
+      }
+
+      th, td {
+          padding: 5px;
+          border: 1px solid;
+      }
+
+
+    </style>
+  </head>
+  <body>
+    <textarea id="source">
+
+class: center, middle
+
+# Polyglot Library Development
+### Neel Shah
+### SDKs @ Sentry
+
+---
+# hi
+
+* maintainer of
+    * sentry-python
+    * sentry-ruby
+* and occasional peruser of
+  * sentry-javascript
+  * sentry-php
+  * sentry-go
+  * relay - rust
+  * sentry - python / django / typescript / react
+
+---
+
+.center[![enjoyer](enjoyer.jpg)]
+
+???
+
+* start by making fun of audience
+* successfully gaslighted and established my superiority
+
+---
+class: full
+
+# full stack
+
+* some backend - python / django
+* some frontend - js / react
+
+.center[![full](full.png)]
+
+???
+
+* building features
+* plumbing APIs
+* most jobs out there today
+
+---
+class: polyglot
+
+# polyglot
+
+* building libraries in many languages
+* same functionality - error handling, tracing, profiling
+* making abstractions work across semantic differences
+
+.center[![polyglot](polyglot.png)]
+
+???
+
+* unique role
+* perspective
+* context switching
+
+---
+# problem space
+
+* API design
+* dynamic vs static / typed languages
+* monkeypatching
+* concurrency
+* packaging
+* human factors
+
+???
+
+* insights
+* lessons learned
+* challenges
+
+---
+# API design
+
+* easy to setup
+    * important for adoption
+    * make lives easier
+* consistent user experience
+* call `sentry.init` and make &#10024; magic &#10024; happen
+
+```python
+import sentry_sdk
+from flask import Flask
+
+sentry_sdk.init(dsn="<DSN>")
+
+app = Flask(__name__)
+```
+
+???
+
+* does a bunch of stuff under the hood
+* just make it work
+* captures exceptions
+* traces requests
+* monkeypatches frameworks, adds hooks
+
+---
+# API design - go
+
+```go
+import (
+    "fmt"
+    "net/http"
+    "github.com/getsentry/sentry-go"
+    sentryfasthttp "github.com/getsentry/sentry-go/fasthttp"
+)
+
+if err := sentry.Init(sentry.ClientOptions{
+    Dsn: "<DSN>",
+}); err != nil {
+    fmt.Printf("Sentry initialization failed: %v\n", err)
+}
+
+sentryHandler := sentryfasthttp.New(sentryfasthttp.Options{})
+
+// After creating the instance, you can attach the handler as one of your middleware
+fastHTTPHandler := sentryHandler.Handle(func(ctx *fasthttp.RequestCtx) {
+    panic("y tho")
+})
+
+if err := fasthttp.ListenAndServe(":3000", fastHTTPHandler); err != nil {
+    panic(err)
+}
+```
+
+???
+
+* way more manual
+* need to wrap handler
+* might need to capture exceptions yourself
+* might need to trace functions yourself
+* no magic at all
+
+---
+# dynamic vs static
+
+|                       | dynamic | static |
+|:---------------------:|:-------:|:------:|
+|     monkeypatching    |   yes   |   no   |
+|         types         |   no*   |   yes  |
+| compile time breakage |    no   |   yes  |
+|    runtime breakage   |   yes   |   no   |
+|     introspection     |   yes   |   no   |
+
+???
+
+* change things at runtime - classes, methods, attributes
+* swap function with wrapped function
+* api contracts
+* function signatures
+* check if things exist
+
+---
+class: monke
+
+# monkepatching
+
+.center[![monkey](monke.gif)]
+
+???
+
+* big and greedy
+* energy
+
+---
+# monkepatching - dynamic
+
+```python
+import sentry_sdk
+
+sentry_sdk.init()
+
+class Foo:
+    def bar():
+        return 42
+```
+
+```python
+import sentry_sdk
+
+old_bar = Foo.bar
+
+def sentry_bar():
+    try:
+        return old_bar()
+    except Exception:
+        exc_info = sys.exc_info()
+        sentry_sdk.capture_exception(exc_info)
+        reraise(*exc_info)
+
+Foo.bar = sentry_bar
+```
+
+* take original code, do some other stuff, run original code
+* leave userland 'unchanged' while injecting side-effects - idempotency
+
+---
+# vs wrapping - static
+
+```rust
+fn foo() -> Result<u32> {
+    42
+}
+
+fn sentryWrapper(f: fn() -> Result<u32>) -> Result<u32> {
+    let result = match f() {
+        Ok(result) => result,
+        Err(err) => {
+            sentry::capture_error(&err);
+            return Err(err);
+        }
+    };
+}
+
+fn main() {
+    let wrappedFoo = sentryWrapper(foo);
+    wrappedFoo();
+}
+```
+
+* force user to wrap their stuff
+* more manual calls to SDK
+* generics, types complications
+
+---
+# lost in translation
+
+* simple syntax differences
+* can cause large problems!
+* forgot return value = monkeypatch broke contract
+
+```python
+def monkeypatch(foo):
+    # blabla
+    return foo()
+```
+
+```python
+def monkeypatch(foo):
+    # blabla
+    foo()
+```
+
+* python - statements and expressions are different
+* ruby - everything is an expression
+
+```ruby
+def foo
+    # blabla
+    42
+end
+```
+
+???
+
+* i'm originally a rubyist
+* make enemies at a python conference
+* cough cough better language
+
+---
+# concurrency
+
+* need to abstract over different models
+* threads - python, ruby, java
+* async / await / tasks - python, node
+* futures - rust
+* coroutines - go
+* actors - erlang / elixir
+
+???
+
+* sharing memory dangerous
+* vs passing messages
+
+---
+# concurrency - problem
+
+* use case - follow user across async computation
+
+```bash
+set_user ----> thread 1 -------|
+         |                     |
+         ----> thread 2 &#128165; ----|
+         |                     |
+         ----> thread 3 ------ |------> join
+```
+
+* extra bookkeeping across threads
+* shared state with locks ?
+* doesn't work for message passing oriented designs
+
+---
+# concurrency - solution
+
+* bag of arbitrary state
+    * sentry - hub - stack of objects
+    * opentelemetry - context - arbitrary dict
+
+> A `Context` is a propagation mechanism which carries execution-scoped values
+across API boundaries and between logically associated **execution units**.
+
+* clone bag on each **execution init**
+* threads, tasks, coroutines
+* pass responsibility to user, not ideal
+* we'll see what to do for elixir / erlang
+
+
+---
+# packaging
+
+* common tooling (craft) to release to
+    * pypi, rubygems, npm, maven...
+* semantic versioning
+* nobody knows what a breaking change
+    * breaking in just the lib or
+    * breaking in an entire system sense?
+* handling of optional dependencies
+    * python has `extras` - single multipackage
+    * npm has peer dependencies - multiple packages for integrations
+
+???
+
+* affects lots of downstream decisions
+
+---
+class: jedi
+
+# human factors
+
+* processes
+* consensus committees and meetings
+* RFCs - requests for comments
+* bikeshedding
+* too many smart people in a room
+
+.center[![jedi](jedi.jpeg)]
+
+---
+class: jedi
+
+# human factors
+
+* impact of legacy decisions
+* historical baggage
+* can't break stuff!
+* system out there in the wild
+* need solid justification
+
+.center[![sadge](sadge.png)]
+
+---
+# wrap up
+
+* reading
+* writing
+* translation
+* design and architecture
+* consensus and collaboration
+
+### References
+
+* Unified API - https://develop.sentry.dev/sdk/unified-api/
+* OpenTelemetry Context - https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/context/README.md
+* Slides made with https://github.com/gnab/remark
+
+    </textarea>
+    <script src="remark.js" type="text/javascript">
+    </script>
+    <script type="text/javascript">
+      var slideshow = remark.create();
+    </script>
+  </body>
+</html>
